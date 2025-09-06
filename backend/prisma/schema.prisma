@@ -1,0 +1,365 @@
+// pong-app/backend/prisma/schema.prisma
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// Enhanced User model with additional fields
+model User {
+  id        String  @id @default(cuid())
+  email     String  @unique
+  password  String
+  name      String  @unique
+  avatarUrl String?
+  isVerified Boolean @default(false)
+  twoFactorSecret String?
+  twoFactorURL String?
+  twoFactorRegistered Boolean @default(false)
+  googleId String?
+  
+  // 🆕 NEW LOBBY FIELDS
+  rank          String    @default("Rookie")
+  lastActive    DateTime  @default(now())
+  status        UserStatus @default(OFFLINE)
+  bio           String?
+  country       String?
+  preferredPaddle String?
+  joinedAt      DateTime  @default(now())
+  totalXP       Int       @default(0)
+  level         Int       @default(1)
+
+  // Existing relationships
+  friends  User[] @relation("UserFriends")
+  friendOf User[] @relation("UserFriends")
+
+  // Enhanced match relationships
+  player1Matches Match[] @relation("Player1Matches")
+  player2Matches Match[] @relation("Player2Matches")
+  winnerMatches Match[] @relation("WinnerMatches")
+
+  // 🆕 NEW RELATIONSHIPS
+  sentFriendRequests     FriendRequest[] @relation("FriendRequestSender")
+  receivedFriendRequests FriendRequest[] @relation("FriendRequestReceiver")
+  
+  sentMessages     Message[] @relation("MessageSender")
+  receivedMessages Message[] @relation("MessageReceiver")
+  
+  achievements     UserAchievement[]
+  gameStats        GameStats?
+  notifications    Notification[]
+  
+  // Tournament participation
+  tournaments      TournamentParticipant[]
+  
+  // 🔥 FIXED: Matching relation name
+  wonTournaments   Tournament[] @relation("TournamentWinner")
+  
+  verificationCodes VerificationCode[]
+  passwordResetToken PasswordResetToken?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// 🆕 User online status enum
+enum UserStatus {
+  ONLINE
+  OFFLINE
+  IN_GAME
+  AWAY
+}
+
+// Enhanced Match model with more details
+model Match {
+  id        String   @id @default(cuid())
+  player1Id String
+  player2Id String
+  winnerId  String?  // Nullable for draws
+  
+  // 🆕 ENHANCED MATCH FIELDS
+  player1Score    Int      @default(0)
+  player2Score    Int      @default(0)
+  matchType       MatchType @default(QUICK_MATCH)
+  status          MatchStatus @default(SCHEDULED)
+  duration        Int?      // Match duration in seconds
+  maxScore        Int       @default(11)  // First to reach this score wins
+  gameMode        String    @default("Standard") // Standard, Speed, Power, etc.
+  
+  startedAt    DateTime?
+  completedAt  DateTime?
+  date         DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  // Relationships
+  player1 User @relation("Player1Matches", fields: [player1Id], references: [id])
+  player2 User @relation("Player2Matches", fields: [player2Id], references: [id])
+  winner  User? @relation("WinnerMatches", fields: [winnerId], references: [id])
+  
+  // 🆕 NEW RELATIONSHIPS
+  tournament   Tournament? @relation(fields: [tournamentId], references: [id])
+  tournamentId String?
+  
+  matchEvents  MatchEvent[]  // For detailed match tracking
+}
+
+// 🆕 Match type enum
+enum MatchType {
+  QUICK_MATCH
+  RANKED
+  TOURNAMENT
+  FRIENDLY
+  PRACTICE
+}
+
+// 🆕 Match status enum
+enum MatchStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  PAUSED
+}
+
+// 🆕 Friend Request system
+model FriendRequest {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  status     FriendRequestStatus @default(PENDING)
+  message    String?  // Optional message with friend request
+  
+  createdAt  DateTime @default(now())
+  respondedAt DateTime?
+
+  sender     User @relation("FriendRequestSender", fields: [senderId], references: [id])
+  receiver   User @relation("FriendRequestReceiver", fields: [receiverId], references: [id])
+
+  @@unique([senderId, receiverId]) // Prevent duplicate requests
+}
+
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+// 🆕 Messaging system
+model Message {
+  id         String   @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String
+  messageType MessageType @default(TEXT)
+  isRead     Boolean  @default(false)
+  
+  createdAt  DateTime @default(now())
+  readAt     DateTime?
+
+  sender     User @relation("MessageSender", fields: [senderId], references: [id])
+  receiver   User @relation("MessageReceiver", fields: [receiverId], references: [id])
+}
+
+enum MessageType {
+  TEXT
+  CHALLENGE
+  SYSTEM
+  ACHIEVEMENT
+}
+
+// 🆕 Game Statistics (detailed player stats)
+model GameStats {
+  id       String @id @default(cuid())
+  userId   String @unique
+  
+  // Win/Loss/Draw stats
+  totalMatches    Int @default(0)
+  wins           Int @default(0)
+  losses         Int @default(0)
+  draws          Int @default(0)
+  
+  // Streak tracking
+  currentWinStreak    Int @default(0)
+  longestWinStreak    Int @default(0)
+  currentLossStreak   Int @default(0)
+  
+  // Performance metrics
+  averageMatchDuration Int @default(0) // in seconds
+  totalPlayTime       Int @default(0)  // total time played in seconds
+  favoriteGameMode    String?
+  
+  // Monthly/Weekly stats
+  weeklyWins         Int @default(0)
+  monthlyWins        Int @default(0)
+  weeklyMatches      Int @default(0)
+  monthlyMatches     Int @default(0)
+  
+  // Last reset dates for periodic stats
+  weeklyStatsResetAt  DateTime @default(now())
+  monthlyStatsResetAt DateTime @default(now())
+  
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+// 🆕 Achievement system
+model Achievement {
+  id          String @id @default(cuid())
+  name        String @unique
+  description String
+  category    String // "Wins", "Streaks", "Social", "Special"
+  iconUrl     String?
+  points      Int    @default(0) // XP points awarded
+  rarity      AchievementRarity @default(COMMON)
+  
+  // Unlock conditions (stored as JSON)
+  conditions  String // JSON string describing unlock conditions
+  
+  createdAt   DateTime @default(now())
+  
+  userAchievements UserAchievement[]
+}
+
+enum AchievementRarity {
+  COMMON
+  RARE
+  EPIC
+  LEGENDARY
+}
+
+// 🆕 User achievements (junction table)
+model UserAchievement {
+  id            String @id @default(cuid())
+  userId        String
+  achievementId String
+  
+  unlockedAt    DateTime @default(now())
+  progress      Int      @default(100) // Percentage progress (100 = completed)
+  
+  user          User        @relation(fields: [userId], references: [id])
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  
+  @@unique([userId, achievementId]) // User can only unlock each achievement once
+}
+
+// 🆕 Tournament system
+model Tournament {
+  id              String @id @default(cuid())
+  name            String
+  description     String?
+  maxParticipants Int
+  entryFee        Int      @default(0)
+  prizePool       Int      @default(0)
+  
+  status          TournamentStatus @default(UPCOMING)
+  tournamentType  TournamentType   @default(SINGLE_ELIMINATION)
+  
+  startDate       DateTime
+  endDate         DateTime?
+  registrationEnd DateTime
+  
+  createdAt       DateTime @default(now())
+  
+  participants    TournamentParticipant[]
+  matches         Match[]
+  
+  // 🔥 FIXED: Matching relation name
+  winnerId        String?
+  winner          User?    @relation("TournamentWinner", fields: [winnerId], references: [id])
+}
+
+enum TournamentStatus {
+  UPCOMING
+  REGISTRATION_OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum TournamentType {
+  SINGLE_ELIMINATION
+  DOUBLE_ELIMINATION
+  ROUND_ROBIN
+  SWISS
+}
+
+// 🆕 Tournament participation
+model TournamentParticipant {
+  id           String @id @default(cuid())
+  tournamentId String
+  userId       String
+  
+  registeredAt DateTime @default(now())
+  eliminated   Boolean  @default(false)
+  finalRank    Int?     // Final ranking in tournament
+  
+  tournament   Tournament @relation(fields: [tournamentId], references: [id])
+  user         User       @relation(fields: [userId], references: [id])
+  
+  @@unique([tournamentId, userId]) // User can only join tournament once
+}
+
+// 🆕 Match events (for detailed match tracking)
+model MatchEvent {
+  id       String @id @default(cuid())
+  matchId  String
+  
+  eventType String    // "SCORE", "PAUSE", "RESUME", "CHAT", etc.
+  data      String?   // JSON data for the event
+  timestamp DateTime  @default(now())
+  
+  match     Match @relation(fields: [matchId], references: [id])
+}
+
+// 🆕 Notification system
+model Notification {
+  id        String @id @default(cuid())
+  userId    String
+  
+  title     String
+  message   String
+  type      NotificationType @default(INFO)
+  isRead    Boolean @default(false)
+  
+  // Optional data (JSON string)
+  data      String?
+  
+  createdAt DateTime @default(now())
+  readAt    DateTime?
+  
+  user      User @relation(fields: [userId], references: [id])
+}
+
+enum NotificationType {
+  INFO
+  FRIEND_REQUEST
+  CHALLENGE
+  MATCH_RESULT
+  TOURNAMENT
+  ACHIEVEMENT
+  SYSTEM
+}
+
+// Existing models (keeping your current structure)
+model VerificationCode {
+  id        String   @id @default(cuid())
+  code      String
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  usedAt    DateTime? 
+  createdAt DateTime @default(now())
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id])
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+}
